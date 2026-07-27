@@ -1,6 +1,6 @@
 # MedDataAnalytics
 
-Automated non-parametric statistical analysis pipeline for medical data.  
+Automated non-parametric statistical analysis pipeline for medical data / 
 Автоматизированный статистический анализ непараметрических медицинских данных
 
 1. **Descriptive statistics / Описательная статистика** for the whole dataset and by target groups / по всей базе и по группам целевой переменной:
@@ -22,15 +22,17 @@ Automated non-parametric statistical analysis pipeline for medical data.
    - Fisher's exact test / Chi-squared / Точный тест Фишера / Хи-квадрат — for categorical variables / для категориальных переменных
 
 5. **Data preprocessing / Предобработка данных:**
-   - Missing values imputed with median (continuous) or "no data" string (categorical) / Заполнение пропусков медианой (количественные) или строкой «нет данных» (категориальные)
-   - Only statistically significant results (p < 0.05) are reported / В отчёте выводятся только статистически значимые результаты (p < 0.05)
+   - Optional steps (configured in code): missing values imputation with median (continuous) or «нет данных» string (categorical); creation of additional variables (e.g., age groups); data filtering (e.g., by age) / По необходимости (настраивается в коде): заполнение пропусков медианой (количественные) или строкой «нет данных» (категориальные), создание дополнительных переменных (пример — возрастная группа), фильтрация наблюдений (пример — по возрасту).
 
+6. **Important / Важно**
+   - Categorical variables must be selected manually by column index. Relative frequencies are calculated by default based on the number of filled cells per column, but can be switched to group size (e.g., only males) or total database size via the `expected_n` parameter /Категориальные переменные выбираются вручную по индексу столбца. Относительные величины по умолчанию рассчитываются от числа заполненных ячеек в столбце, но могут быть переключены на размер группы целевой переменной (например, только мужчины) или общее число пациентов в базе через параметр `expected_n`.
+
+7. **Reporting / Формирование отчёта**
+   - Only statistically significant results (p < 0.05) are included in the report / В отчёт выводятся только статистически значимые результаты (p < 0.05)
+   - Output format: Microsoft Word (.docx) / Формат выходного файла: Microsoft Word (.docx)
 
 ## Installation / Установка
-pip install -r requirements.txt
 
-## Usage / Запуск
-# 1 загружаем excel в папку data/ place your Excel file into the data/ folder / 
-# 2 меняем "Headache_Sample_DB.xlsx" в INPUT_FILE на имя своего файла / update INPUT_PATH in stat.py to match your filename
-# 3 запускаем / run python stat.py
-# 4 отчет сохраняется в папке / the report will be saved to output/
+```bash
+pip install -r requirements.txt
+```

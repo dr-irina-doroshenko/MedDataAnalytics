@@ -5,6 +5,8 @@
 *.doc
 *.pdf
 
+!data/Headache_Sample_DB.xlsx
+
 __pycache__/
 *.py[cod]
 *$py.class

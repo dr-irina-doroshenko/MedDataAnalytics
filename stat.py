@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from itertools import combinations
+from scipy import stats
 from scipy.stats import mannwhitneyu, chi2_contingency, fisher_exact, kruskal, spearmanr, kendalltau
 from docx import Document
 from pathlib import Path
@@ -8,75 +9,87 @@ from pathlib import Path
 #загружам базу данных из Листа 1 Excel
 INPUT_PATH = Path("data") / "Headache_Sample_DB.xlsx"
 OUTPUT_PATH = Path("output") / "статистический_отчет.docx"
+OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
 df = pd.read_excel(INPUT_PATH, sheet_name="Лист1")
-#с компьютера
+#если с компьютера
 #df = pd.read_excel(r"D:\Project\Headache_Sample_DB.xlsx", sheet_name="Лист1")
 
-#ПРЕДОБРАБОТКА ДАННЫХ
-# 1. в исследование включаем только детей в возрасте 12 лет и старше
-df = df[df['Age'] >= 12]
-# 2. проверяем на наличие пропусков в строках
-# если столбец с количественными данными - заполняем пустую строку медианой, если весь столбец пустой - 0
-for col in df.select_dtypes(include=["int64", "float64"]).columns:
-    if df[col].isna().sum() > 0:
-        if df[col].dropna().shape[0] > 0:
-            df[col] = df[col].fillna(df[col].median())
-        else:
-            df[col] = df[col].fillna(0)
-# если столбец с качественными данными - заполняем пустую строку "нет данных"
-for col in df.select_dtypes(include=["object", "category"]).columns:
-    df[col] = df[col].fillna("нет данных")
-# проверяем остались ли пропуски
-print("Осталось NaN:", df.isna().sum().sum())
+# 1. ПРЕДОБРАБОТКА ДАННЫХ
+# 1.1. фильтрация - в исследование включаем только детей в возрасте 12 лет и старше (например)
+# df = df[df['Age'] >= 12]
 
-#ВЫБОР ПЕРЕМЕННЫХ ДЛЯ АНАЛИЗА
-# 1. выбор целевых переменных по имени столбца
+# 1.2А сохраняем данные (до заполнения пропусков, если потребуется)
+df_raw = df.copy()
+# для функции расчета категориальных данных по абс. (n=)
+# - словарь из имени столбца и количества заполенных строк (для n=)
+VALID_N = {col: df_raw[col].notna().sum() for col in df_raw.columns}
+# - cловарь по индексу столбца (
+VALID_N_BY_IDX = {i: df_raw.iloc[:, i].notna().sum() for i in range(df_raw.shape[1])}
 
-# создание новой переменной - например - возрастной период
-def create_age_groups(df, age_col='Age'):
-    """
-    Создаем переменную 'Возрастная_группа' на основе возраста
-    Периоды:
-    - < 1: грудной возраст
-    - 1-3: ранний возраст
-    - 3-5: дошкольный возраст
-    - 6-9: младший школьный возраст
-    - 10-134: средний школьный возраст
-    - >= 14: старший школьный возраст
-    """
+# # 1.2B заполняем пустые строки (при необходимости!!!)
+# # иначе расчет пойдет по количетсву n= для столбца
+# # если столбец с количественными данными - заполняем пустую строку медианой, если весь столбец пустой - 0
+# for col in df.select_dtypes(include=["int64", "float64"]).columns:
+#     if df[col].isna().sum() > 0:
+#         if df[col].dropna().shape[0] > 0:
+#             df[col] = df[col].fillna(df[col].median())
+#         else:
+#             df[col] = df[col].fillna(0)
+# # если столбец с качественными данными - заполняем пустую строку "нет данных"
+# for col in df.select_dtypes(include=["object", "category"]).columns:
+#     df[col] = df[col].fillna("нет данных")
+# # проверяем остались ли пропуски
+# print("Осталось NaN:", df.isna().sum().sum())
 
-    def categorize_age(age):
-        if pd.isna(age):
-            return "нет данных"
-        elif age < 1:
-            return "грудной возраст"
-        elif 1 <= age < 3:
-            return "ранний возраст"
-        elif 3 <= age < 6:
-            return "дошкольный возраст"
-        elif 6 <= age < 10:
-            return "младший школьный возраст"
-        elif 10 <= age < 14:
-            return "средний школьный возраст"
-        else:  # age >= 14
-            return "старший школьный возраст"
+# 1.3 создание новой переменной (при необходимости) - например - возрастной период
+# def create_age_groups(df, age_col='Age'):
+#     """
+#     Создаем переменную 'Возрастная_группа' на основе возраста
+#     Периоды:
+#     - < 1: грудной возраст
+#     - 1-3: ранний возраст
+#     - 3-5: дошкольный возраст
+#     - 6-9: младший школьный возраст
+#     - 10-134: средний школьный возраст
+#     - >= 14: старший школьный возраст
+#     """
+
+#     def categorize_age(age):
+#         if pd.isna(age):
+#             return "нет данных"
+#         elif age < 1:
+#             return "грудной возраст"
+#         elif 1 <= age < 3:
+#             return "ранний возраст"
+#         elif 3 <= age < 6:
+#             return "дошкольный возраст"
+#         elif 6 <= age < 10:
+#             return "младший школьный возраст"
+#         elif 10 <= age < 14:
+#             return "средний школьный возраст"
+#         else:  # age >= 14
+#             return "старший школьный возраст"
     
-    # создаем новую колонку
-    df['Age_group'] = df[age_col].apply(categorize_age)
+#     # создаем новую колонку
+#     df['Age_group'] = df[age_col].apply(categorize_age)
     
-    # Проверяем распределение
-    print("Распределение по возрастным группам:")
-    print(df['Age_group'].value_counts().sort_index())
+#     # Проверяем распределение
+#     print("Распределение по возрастным группам:")
+#     print(df['Age_group'].value_counts().sort_index())
     
-    return df
+#     return df
+# # создаем возрастные группы в базе
+# df = create_age_groups(df, age_col='Age')
 
-# создаем возрастные группы
-df = create_age_groups(df, age_col='Age')
+#2. ВЫБОР ПЕРЕМЕННЫХ ДЛЯ АНАЛИЗА
+# 2.1. выбор целевых переменных по имени столбца
 
-# целевые переменные в данном файле - выделенные переменные для статистического анализа - выбор исследователя
+# целевые переменные в данном файле - выделенные переменные для статистического анализа 
+# !!!выбирает исследователь в ручную!
 TARGET_COLUMNS = ['Gender', 'Age_group']
 
-# 2. выбор столбцов для анализа
+# 2.2. выбор столбцов для анализа
 
 # определяем реальное количество столбцов в файле
 total_cols = df.shape[1]
@@ -85,8 +98,8 @@ print(f"В файле {total_cols} столбцов")
 # если нужно выбрать все
 # cols_to_use0 = list(range(0, total_cols))
 
-# выбираем в ручную, если база данных не адаптирована!!!
-# например без ID пациента (1-105)
+# выбираем в ручную, если база данных не адаптированы! 
+# например без первого столбца ID[0] пациента (1-105)
 cols_to_use0 = list(range(1, 105)) 
 df_selected0 = df.iloc[:, cols_to_use0]
 
@@ -95,7 +108,9 @@ df_base = df_selected0.iloc[:, cols_to_use].copy()  # базовый DataFrame �
 df_base['Age_group'] = df['Age_group'] # базовый DataFrame с целевыми, которые мы создал cами
 
 # 3. предобработка категориальных переменных
-# определяем В РУЧНУЮ! столбы с категориальными переменными, если база не адаптирована! и приводим их строкам (делаем их текстовым форматом)
+# определяем В РУЧНУЮ! столбы с категориальными переменными, если база не адаптирована!
+# (например, ранговые переменные идут цифрами, а не текстом!!! - только вручную) 
+# приводим их строкам (делаем их текстовым форматом)
 categorical_idx = list(range(8, 104))
 # categorical_idx = (
 #     list(range(8, 195)) + 
@@ -104,11 +119,19 @@ categorical_idx = list(range(8, 104))
 # )
 
 for col in df_base.columns[categorical_idx]:
+    df_base[col] = df_base[col].fillna("нет данных")
     df_base[col] = df_base[col].astype(str)
 
 
+#3. CТАТАНАЛИЗ
 
-#CТАТАНАЛИЗ
+# функция определения n= для категориальных столбцов
+def get_expected_n(col_idx, default_n=None):
+    """
+    Определяем n для категориального столбца по его индексу.
+    """
+   
+    return VALID_N_BY_IDX.get(col_idx, default_n if default_n is not None else len(df_raw))
 
 # функция - сила связи по Крамеру для хи-квадрата
 def calculate_cramers_v(chi2, n, min_dim):
@@ -162,10 +185,11 @@ def chi2_with_fisher_correction(table, fisher_threshold=5):
 
 
 # функция - корреляционный анализ по Спирмену и Кендалл по типу все со всем
-#! Спирмен - если хотя бы 1 переменная количественная, Кендал для ранговых, для бинарных - Фишер (см. выше)
+#! Спирмен оцениваем только - если хотя бы 1 переменная количественная
+#! Кендал оцениваем - для количевеных vs ранговых, ранговых vs ранговых для бинарных - Фишер (см. выше)
 def calculate_overall_correlations(df_base, num_cols):
     """
-    Рассчет корреляции Спирмена и Тау-Кендалла по всей базе
+    Расчет корреляции Спирмена и Тау-Кендалла по всей базе
     """
     print("Корреляционный анализ по всей базе")
 
@@ -182,7 +206,7 @@ def calculate_overall_correlations(df_base, num_cols):
 # функция - проводим общую описательную статистику
 def calculate_overall_descriptive(df_base, categorical_idx, target_columns=None):
     """
-    Рассчет описательной статистики для всей базы данных
+    Расчет описательной статистики для всей базы данных
     """
     print("Описательной статистики для всей базы данных")
 
@@ -209,7 +233,13 @@ def calculate_overall_descriptive(df_base, categorical_idx, target_columns=None)
     # Количественные переменные
     print(f"\nКоличественные переменные ({len(num_cols)}):")
     for col in num_cols:
-        n_valid = df_base[col].notna().sum()
+        data_valid = df_base[col].dropna()
+        n_valid = len(data_valid)
+
+        if n_valid == 0:
+            print(f"  {col}: нет заполненных данных")
+            continue
+
         stats = df_base[col].describe(percentiles=[0.25, 0.5, 0.75]).round(2)
 
         results['numeric'][col] = {
@@ -231,24 +261,42 @@ def calculate_overall_descriptive(df_base, categorical_idx, target_columns=None)
     # Категориальные переменные
     print(f"\nКатегориальные переменные ({len(all_cat_cols)}):")
     for col in all_cat_cols:
+        col_idx = df_base.columns.get_loc(col)
+        expected_n = get_expected_n(col_idx, n_total)
         valid_data = df_base[col][(df_base[col].notna()) & (df_base[col] != "нет данных")]
         n_valid = len(valid_data)
         n_missing = n_total - n_valid
-
+        if n_valid == 0:
+            continue
         dist = valid_data.value_counts(normalize=True)
         cat_stats = []
 
-        print(f"\n  {col} (n={n_valid}, пропусков/нет данных: {n_missing}):")
+        print(f"\n  {col} (n={expected_n}, заполнено: {n_valid}, пропусков/нет данных: {n_missing}):")
 
         for cat, prop in dist.items():
-            pct = round(prop * 100, 1)
-            se = np.sqrt(prop * (1 - prop) / n_valid)
-            
-            # Рассчет доверительных интервалов (в процентах)
-            ci_low = round(max(0.0, (prop - 1.96 * se) * 100), 1)
-            ci_high = round(min(100.0, (prop + 1.96 * se) * 100), 1)
-
             abs_count = valid_data.value_counts().get(cat, 0)
+
+            if expected_n > 0 and abs_count > 0:
+                z = 1.96
+                p = abs_count / expected_n
+                n = expected_n
+
+                denominator = 1 + z**2 / n
+                centre = (p + z**2 / (2*n)) / denominator
+                half_width = z * np.sqrt((p*(1-p) + z**2/(4*n)) / n) / denominator
+
+                ci_low = max(0, round((centre - half_width) * 100, 1))
+                ci_high = min(100, round((centre + half_width) * 100, 1))
+
+                if ci_low > ci_high or ci_low < 0 or ci_high > 100:
+                    alpha = 0.05
+                    ci_low = round(stats.beta.ppf(alpha/2, abs_count, expected_n - abs_count + 1) * 100, 1)
+                    ci_high = round(stats.beta.ppf(1 - alpha/2, abs_count + 1, expected_n - abs_count) * 100, 1)
+            else:
+                ci_low = 0.0
+                ci_high = 100.0 if abs_count > 0 else 0.0
+
+            pct = round((abs_count / expected_n) * 100, 1)
 
             cat_stats.append({
                 'category': cat,
@@ -257,10 +305,11 @@ def calculate_overall_descriptive(df_base, categorical_idx, target_columns=None)
                 'ci_low': ci_low,
                 'ci_high': ci_high
             })
-            print(f"    {cat}: n={abs_count}, {pct}%, 95%ДИ: {ci_low}-{ci_high}")
+            print(f"    {cat}: n={abs_count} {pct}% (95%ДИ: {ci_low}-{ci_high})")
 
         results['categorical'][col] = {
-            'n_total': n_valid,
+            'n_total': expected_n,
+            'n_valid': n_valid,
             'n_missing': n_missing,
             'categories': cat_stats
         }
@@ -275,10 +324,9 @@ def calculate_overall_descriptive(df_base, categorical_idx, target_columns=None)
 # функция - описательная статистика целевых переменных
 def calculate_group_descriptive(df_work, target_column, groups, num_cols, cat_cols, n_total):
     """
-    Рассчет описательной статистики по группам целевой переменной
+    Расчет описательной статистики по группам целевой переменной
     """
     print(f"Описательная статистика по целевым переменным: {target_column}")
-    print(f"{'='*70}")
 
     group_stats = {}
 
@@ -291,17 +339,17 @@ def calculate_group_descriptive(df_work, target_column, groups, num_cols, cat_co
 
         # Количественные переменные
         for col in num_cols:
-            valid_data = df_g[col].dropna()
-            n_valid = len(valid_data)
+            data = df_g[col].dropna()
+            n_valid = len(data)
 
             if n_valid > 0:
-                mean_val = valid_data.mean()
-                std_val = valid_data.std() if n_valid > 1 else 0.0
-                median_val = valid_data.median()
-                q25 = valid_data.quantile(0.25)
-                q75 = valid_data.quantile(0.75)
-                min_val = valid_data.min()
-                max_val = valid_data.max()
+                mean_val = data.mean()
+                std_val = data.std() if n_valid > 1 else 0.0
+                median_val = data.median()
+                q25 = data.quantile(0.25)
+                q75 = data.quantile(0.75)
+                min_val = data.min()
+                max_val = data.max()
 
                 group_stats[str(g)]['numeric'][col] = {
                     'n': n_valid,
@@ -319,6 +367,11 @@ def calculate_group_descriptive(df_work, target_column, groups, num_cols, cat_co
 
         # Категориальные переменные
         for col in cat_cols:
+            col_idx = df_work.columns.get_loc(col)
+            expected_n = get_expected_n(col_idx, n_g)  # за 100% принимается число заполненных ячеек в столбце (по всей базе)
+            # expected_n = n_g                         # за 100% принимается размер группы (например, только мужчины)
+            # expected_n = n_total                     # за 100% принимается общее число пациентов в базе
+
             valid_data = df_g[col][(df_g[col].notna()) & (df_g[col] != "нет данных")]
             n_valid = len(valid_data)
 
@@ -326,14 +379,31 @@ def calculate_group_descriptive(df_work, target_column, groups, num_cols, cat_co
                 dist = valid_data.value_counts(normalize=True)
                 cat_stats = []
 
-                print(f"  {col} (n={n_valid}):")
+                print(f"  {col} (n={expected_n}, заполнено: {n_valid}):")
 
                 for cat, prop in dist.items():
-                    pct = round(prop * 100, 1)
-                    se = np.sqrt(prop * (1 - prop) / n_valid)
-                    ci_low = round(max(0.0, (prop - 1.96 * se) * 100), 1)
-                    ci_high = round(min(100.0, (prop + 1.96 * se) * 100), 1)
                     abs_count = valid_data.value_counts().get(cat, 0)
+                    if expected_n > 0 and abs_count > 0:
+                        z = 1.96
+                        p = abs_count / expected_n
+                        n = expected_n
+
+                        denominator = 1 + z**2 / n
+                        centre = (p + z**2 / (2*n)) / denominator
+                        half_width = z * np.sqrt((p*(1-p) + z**2/(4*n)) / n) / denominator
+
+                        ci_low = max(0, round((centre - half_width) * 100, 1))
+                        ci_high = min(100, round((centre + half_width) * 100, 1))
+
+                        if ci_low > ci_high or ci_low < 0 or ci_high > 100:
+                            alpha = 0.05
+                            ci_low = round(stats.beta.ppf(alpha/2, abs_count, expected_n - abs_count + 1) * 100, 1)
+                            ci_high = round(stats.beta.ppf(1 - alpha/2, abs_count + 1, expected_n - abs_count) * 100, 1)
+                    else:
+                        ci_low = 0.0
+                        ci_high = 100.0 if abs_count > 0 else 0.0
+
+                    pct = round((abs_count / expected_n) * 100, 1)
 
                     cat_stats.append({
                         'category': cat,
@@ -343,10 +413,11 @@ def calculate_group_descriptive(df_work, target_column, groups, num_cols, cat_co
                         'ci_high': ci_high
                     })
 
-                    print(f"    {cat}: n={abs_count}, {pct}%, 95%ДИ: {ci_low}-{ci_high}")
+                    print(f"    {cat}: n={abs_count} {pct}% (95%ДИ: {ci_low}-{ci_high})")
 
                 group_stats[str(g)]['categorical'][col] = {
-                    'n_total': n_valid,
+                    'n_valid': n_valid,
+                    'n_expected': expected_n,
                     'categories': cat_stats
                 }
 
@@ -355,8 +426,7 @@ def calculate_group_descriptive(df_work, target_column, groups, num_cols, cat_co
 # функция корреляционного анализа (и выгрузка)
 def calculate_correlations(df_work, num_cols, method='spearman'):
     """
-    Рассчитываем корреляционную матрицу для числовых переменных
-    method: 'spearman' (хотя бы одна количественная переменная) или 'kendall' (все ранговые переменные)
+    Расчитываем корреляционную матрицу для числовых переменных
     """
     if len(num_cols) < 2:
         return None, None
@@ -431,7 +501,6 @@ def analyze_single_target(df_base, target_column, categorical_idx):
     Проводит полный анализ для одной целевой переменной
     """
     print(f"Анализ целевой переменной: {target_column}")
-    print(f"{'='*70}")
 
     if target_column not in df_base.columns:
         print(f"Переменная '{target_column}' не найдена! Пропускаем.")
@@ -459,7 +528,6 @@ def analyze_single_target(df_base, target_column, categorical_idx):
 
     # 2. Корреляционный анализ
     print("Корреляционный анализ групп целевой пемеменной")
-    print(f"{'='*50}")
 
     correlation_results = {}
 
@@ -476,11 +544,13 @@ def analyze_single_target(df_base, target_column, categorical_idx):
         }
 
     # 3. Множественное сравнение
+    print("Множественное сравнение групп целевой пемеменной")
+    
     mult_results = {'numeric': [], 'categorical': []}
 
     for col in num_cols:
         try:
-            group_data = [df_work[df_work['group'] == str(g)][col].values for g in groups]
+            group_data = [df_work[df_work['group'] == str(g)][col].dropna().values for g in groups]
             
             all_combined = np.concatenate(group_data)
             if len(group_data) > 1 and np.unique(all_combined).size > 1:
@@ -507,6 +577,8 @@ def analyze_single_target(df_base, target_column, categorical_idx):
             print(f"Ошибка в {col}: {e}")
 
     # 4. Попарные сравнения
+
+    print("Попарное сравнение групп целевой пемеменной")
     pairwise_results = []
     pairs = list(combinations(groups, 2))
 
@@ -526,8 +598,10 @@ def analyze_single_target(df_base, target_column, categorical_idx):
 
         for col in num_cols:
             try:
-                if len(df1[col]) > 0 and len(df2[col]) > 0:
-                    stat, p = mannwhitneyu(df1[col], df2[col], alternative="two-sided")
+                d1 = df1[col].dropna()
+                d2 = df2[col].dropna()
+                if len(d1) > 0 and len(d2) > 0:
+                    stat, p = mannwhitneyu(d1, d2, alternative="two-sided")
                     pair_results['numeric'].append({
                         'variable': col,
                         'statistic': stat,
@@ -682,7 +756,7 @@ def generate_combined_report(all_results, overall_stats):
             if stats_g['categorical']:
                 doc.add_heading('Категориальные признаки:', level=4)
                 for col, data in stats_g['categorical'].items():
-                    doc.add_paragraph(f"{col} (n={data['n_total']}):", style='List Bullet')
+                    doc.add_paragraph(f"{col} (n={data['n_expected']}, заполнено: {data['n_valid']}):", style='List Bullet')
                     for cat in data['categories']:
                         doc.add_paragraph(
                             f"{cat['category']}: n={cat['n']}, {cat['percent']}%, "
@@ -796,7 +870,7 @@ def generate_combined_report(all_results, overall_stats):
         doc.add_page_break()
 
     doc.save(OUTPUT_PATH)
-    print(f"Статистический отчет сохранен: {OUTPUT_PATH}")
+    print(f"Статистический отчет сохранен: {OUTPUT_PATH.resolve()}")
     return OUTPUT_PATH
 
 # ОСНОВНОЙ ЗАПУСК
